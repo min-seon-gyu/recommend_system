@@ -1,9 +1,6 @@
 package kr.recommendsystem.domain
 
-import jakarta.persistence.Column
-import jakarta.persistence.Entity
-import jakarta.persistence.GeneratedValue
-import jakarta.persistence.Id
+import jakarta.persistence.*
 
 @Entity
 class Post(
@@ -15,5 +12,10 @@ class Post(
     val title: String,
 
     @Column(nullable = false)
-    val content: String
+    val content: String,
+
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    val user: User
 )

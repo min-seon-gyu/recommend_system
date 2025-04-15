@@ -3,7 +3,7 @@ package kr.recommendsystem.scheduler
 data class UserPostScore(
     val userId: Long,
     val postId: Long,
-    val weight: Long
+    val weight: Double
 )
 
 fun List<UserPostScore>.printPretty() {
@@ -14,7 +14,7 @@ fun List<UserPostScore>.printPretty() {
     /* 본문 출력 */
     forEach {
         println(
-            "%-10d %-10d %-12d".format(
+            "%-10d %-10d %-12f".format(
                 it.userId,
                 it.postId,
                 it.weight

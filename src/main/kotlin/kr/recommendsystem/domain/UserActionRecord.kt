@@ -8,16 +8,9 @@ import java.time.OffsetDateTime
  */
 @Entity
 /** post_id, user_id 조합이 유일해야 하므로 unique constraint를 설정합니다. **/
-/** post_id, user_id 인덱스를 설정하여 조회 성능을 높입니다. **/
 @Table(
     uniqueConstraints = [
         UniqueConstraint(name = "UniquePostIdAndUserId", columnNames = ["post_id", "user_id"])
-    ],
-    indexes = [
-        Index(name = "idx_post", columnList = "post_id"),
-        Index(name = "idx_user", columnList = "user_id"),
-        Index(name = "idx_view_count", columnList = "view_count"),
-        Index(name = "idx_favorite", columnList = "favorite")
     ])
 class UserActionRecord(
     @Id

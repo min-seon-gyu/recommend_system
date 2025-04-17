@@ -7,7 +7,6 @@ import kr.recommendsystem.repository.UserActionRecordRepository
 import kr.recommendsystem.repository.UserRepository
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.sqrt
 import kotlin.system.measureNanoTime
 
@@ -34,7 +33,7 @@ class RecommendScheduler(
      */
     @Scheduled(cron = "0 0 3 * * *")
     fun calculateSimilarity() {
-        val userId = 10001L
+        val userId = 1L
 
         // TODO: 사용자 ID를 기준으로 이미 데이터가 있는 경우 or 게시글과 상호작용이 없는 사용자에 경우 생략
         CoroutineScope(Dispatchers.Default).launch {
@@ -82,133 +81,159 @@ class RecommendScheduler(
     private fun prepareUserData(weights: List<UserPostScore>) {
         userPosts = weights
             .groupBy { it.userId }
-            .mapValues { entry -> entry.value.map { it.postId }.toSet() }
+            .mapValues { it.value.map { postScore -> postScore.postId }.toSet() }
 
         userVectors = weights
             .groupBy { it.userId }
-            .mapValues { entry ->
-                entry.value.associate { it.postId to it.weight }
-            }
+            .mapValues { it.value.associate { postScore -> postScore.postId to postScore.weight } }
 
         userNorms = userVectors
-            .mapValues { (_, vec) ->
-                sqrt(vec.values.sumOf { it * it })
-            }
+            .mapValues { sqrt(it.value.values.sumOf { score -> score * score }) }
     }
 
     /**
-     * 특정 사용자(userId)와 다른 사용자들 사이의 코사인 유사도를 계산합니다.
+     * 특정 사용자(userId)와 다른 사용자들 간의 코사인 유사도를 계산합니다.
      *
-     * 1) 사용자-게시글 벡터 전체 구성
-     * 2) 비교 대상 사용자 목록 추출 (자기 자신 제외)
-     * 3) CPU 바운드 작업을 Dispatchers.Default에서 병렬 실행
-     *    3-1) 코어 수 기반으로 배치 크기 계산
-     *    3-2) 사용자 ID 목록을 배치 단위로 분할
-     *    3-3) 각 배치에서
-     *         - 공통 게시글에 대한 내적(dot product) 계산
-     *         - 벡터 노름을 사용해 코사인 유사도 계산
-     *         - 결과를 리스트에 추가
-     *    3-4) 모든 비동기 작업 완료 대기
-     * 4) 최종 유사도 리스트 반환
+     * 절차:
+     * 1) 비교 대상 사용자 목록 구성 (자기 자신 제외)
+     * 2) Dispatchers.Default 컨텍스트에서 병렬 처리
+     *    a) CPU 코어 수 기반으로 batchSize 계산
+     *    b) otherUserIds를 batchSize 단위로 분할
+     *    c) 각 배치마다 async로 유사도 계산:
+     *       - baseVector(기준 벡터)와 targetVector(비교 벡터) 조회
+     *       - 공통 게시글에 대해 내적(dot product) 계산
+     *       - 벡터 노름(norm)을 사용해 코사인 유사도 계산
+     *       - UserSimilarity 객체 생성
+     *    d) 모든 비동기 작업 완료 대기 및 결과 평탄화
+     * 3) 최종 UserSimilarity 리스트 반환
      */
     suspend fun calculatorUserSimilarities(weights: List<UserPostScore>, userId: Long): List<UserSimilarity> {
 
-        /** 자기 자신을 제외하고, 게시글과 상호작용을 한 유저의 ID Set**/
+        // 1) 자기 자신을 제외한 비교 대상 사용자 ID 집합
         val otherUserIds = userVectors.keys.filter { it != userId }.toSet()
 
-        /** 병렬로 코사인 유사도 계산 **/
+        // 2) 병렬 코사인 유사도 계산
         return coroutineScope {
             withContext(Dispatchers.Default) {
+                // a) 배치 크기 계산: 전체 유저 수 / (코어 수 * 4), 최소 1
                 val coreCount = Runtime.getRuntime().availableProcessors()
                 val batchSize = maxOf(1, otherUserIds.size / (coreCount * 4))
 
+                // b) ID 목록을 배치로 분할 후 async 실행
                 val deferred = otherUserIds
                     .chunked(batchSize)
-                    .map { userBatch ->
+                    .map { batch ->
                         async {
                             val baseVector = userVectors[userId]!!
                             val normA = userNorms[userId] ?: 0.0
 
-                            userBatch.map { otherUserId ->
+                            batch.map { otherUserId ->
                                 val targetVector = userVectors[otherUserId]!!
                                 val normB = userNorms[otherUserId] ?: 0.0
 
-                                /** 공통 게시글만 골라서 내적 계산 **/
-                                val dot = baseVector.keys
+                                // c.i) 공통 게시글 키로 내적(dot product) 계산
+                                val dotProduct = baseVector.keys
                                     .intersect(targetVector.keys)
-                                    .sumOf { postId -> baseVector[postId]!! * targetVector[postId]!! }
+                                    .sumOf { postId ->
+                                        baseVector[postId]!! * targetVector[postId]!!
+                                    }
 
-                                /** 코사인 유사도 계산 **/
-                                val sim = if (normA == 0.0 || normB == 0.0) 0.0
-                                else dot / (normA * normB)
+                                // c.ii) 코사인 유사도 계산 (0 벡터 처리)
+                                val similarity = if (normA == 0.0 || normB == 0.0) 0.0
+                                else dotProduct / (normA * normB)
 
-                                UserSimilarity(baseUserId = userId, targetUserId = otherUserId, similarity = sim)
+                                // c.iii) 결과 객체 생성
+                                UserSimilarity(
+                                    baseUserId = userId,
+                                    targetUserId = otherUserId,
+                                    similarity = similarity
+                                )
                             }
                         }
                     }
+
+                // d) 모든 async 결과 합쳐서 평탄화
                 deferred.awaitAll().flatten()
             }
         }
     }
 
     /**
-     * 특정 사용자(userId)에 대해 유사도 기반으로 추천 게시글을 계산합니다.
+     * 특정 사용자(userId)에 대해 유사도 기반 추천 게시글을 계산합니다.
      *
-     * 절차:
-     * 1) similarities를 유사도 내림차순 정렬 후 상위 topNSimilarity 명만 선별
-     * 2) 대상 사용자가 이미 상호작용한 게시글 ID 집합 조회
-     * 3) 추천 점수 누적용 ConcurrentHashMap(postScore) 초기화
-     * 4) Dispatchers.Default 컨텍스트에서 병렬 처리
-     *    4-1) CPU 코어 수 기반으로 배치 크기(batchSize) 계산
-     *    4-2) 유사도 상위 K명 리스트를 batchSize 단위로 분할
-     *    4-3) 각 배치(async)마다:
-     *         - targetUserId의 게시글 벡터 순회
-     *         - 이미 상호작용한 게시글은 건너뛰고
-     *         - postScore.compute()로 similarity * weight 누적
-     *    4-4) 모든 async 작업 완료 대기
-     * 5) postScore의 엔트리를 점수 내림차순 정렬 후 상위 topNPosts 개 Recommendation 생성
+     * 1) similarities를 유사도 내림차순으로 정렬 후 상위 topNSimilarity 개만 선택
+     * 2) userId가 이미 상호작용한 게시글 ID 집합을 조회
+     * 3) Dispatchers.Default 컨텍스트에서 병렬 처리 수행
+     *    a) CPU 코어 수에 따라 batchSize 계산
+     *    b) sortSimilarities를 batchSize 단위로 분할
+     *    c) 각 배치마다 async로 추천 점수 생성:
+     *       - targetUserId의 게시글 벡터 조회 (없으면 스킵)
+     *       - 이미 상호작용한 게시글은 제외
+     *       - similarity * weight 계산 후 Recommendation 객체 생성
+     *    d) 모든 async 작업 완료 대기
+     * 4) 생성된 Recommendation 리스트를 (userId, postId) 기준으로 합산
+     * 5) 총합 점수 내림차순 정렬 후 상위 topNPosts 개 반환
      */
     private suspend fun calculatorRecommendations(
         similarities: List<UserSimilarity>, userId: Long, topNSimilarity: Int = 100, topNPosts: Int = 500
     ): List<Recommendation> {
-        /** 유사도를 기준으로 내림차순으로 정렬 후 상위 K개 필터링 **/
-        val sortSimilarities = similarities.sortedByDescending { it.similarity }.take(topNSimilarity)
 
-        /** 이미 상호작용을 한 게시글 ID Set **/
+        // 1) 유사도 내림차순 정렬 후 상위 K개 선택
+        val sortSimilarities = similarities
+            .sortedByDescending { it.similarity }
+            .take(topNSimilarity)
+
+        // 2) 이미 상호작용한 게시글 ID 집합
         val interactedPostIds = userPosts[userId] ?: emptySet()
 
-        /** 게시글의 추천 점수를 저장할 Map **/
-        val postScore = ConcurrentHashMap<Long, Double>()
-
-        /** 병렬로 추천 게시글 선정 **/
-        coroutineScope {
+        // 3) 병렬 처리로 Recommendation 생성
+        val recommendations = coroutineScope {
             withContext(Dispatchers.Default) {
+                // 배치 크기 계산: 전체 유사도 개수 / (코어 수 * 4), 최소 1
                 val coreCount = Runtime.getRuntime().availableProcessors()
                 val batchSize = maxOf(1, sortSimilarities.size / (coreCount * 4))
 
-                sortSimilarities
+                // 유사도 리스트를 batchSize 단위로 분할 후 async 실행
+                val deferred = sortSimilarities
                     .chunked(batchSize)
-                    .map { userBatch ->
+                    .map { batch ->
                         async {
-                            /** 유사도 상위 K명을 기반으로 추천 게시글을 계산 **/
-                            for ((baseUserId, targetUserId, similarity) in userBatch) {
-                                val targetUserVector = userVectors[targetUserId] ?: continue
-                                for ((postId, weight) in targetUserVector) {
-                                    /** 추천 게시글이 이미 상호작용한 게시글인 경우 제외 **/
-                                    if (postId in interactedPostIds) continue
-                                    postScore.compute(postId) { _, value -> (value ?: 0.0) + similarity * weight }
+                            batch.flatMap { similarity ->
+                                // 3.c.i) 대상 사용자의 벡터 가져오기 (없으면 빈 리스트)
+                                val vector = userVectors[similarity.targetUserId] ?: return@flatMap emptyList<Recommendation>()
+
+                                // 3.c.ii) 이미 상호작용한 게시글 제외
+                                val filtered = vector.filterKeys { it !in interactedPostIds }
+
+                                // 3.c.iii) Recommendation 객체 생성
+                                filtered.map { (postId, weight) ->
+                                    Recommendation(
+                                        userId = userId,
+                                        postId = postId,
+                                        score = similarity.similarity * weight
+                                    )
                                 }
                             }
                         }
                     }
-                    .awaitAll()
+                // 3.d) 모든 async 결과를 합쳐서 반환
+                deferred.awaitAll().flatten()
             }
         }
 
-        return postScore.entries
-            .sortedByDescending { it.value }
+        // 4) (userId, postId) 기준으로 점수 합산 후 5) 내림차순 정렬 및 topNPosts 개 반환
+        return recommendations
+            .asSequence()
+            .groupBy { it.userId to it.postId }
+            .map { (key, recs) ->
+                Recommendation(
+                    userId = key.first,
+                    postId = key.second,
+                    score = recs.sumOf { it.score }
+                )
+            }
+            .sortedByDescending { it.score }
             .take(topNPosts)
-            .map { Recommendation(userId = userId, postId = it.key, score = it.value) }
+            .toList()
     }
 }
-

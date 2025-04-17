@@ -11,6 +11,7 @@ class User(
     @GeneratedValue(strategy = jakarta.persistence.GenerationType.IDENTITY)
     var id: Long? = null,
 
+    /** 이름 **/
     @Column(unique = true, nullable = false)
     val username: String
 )

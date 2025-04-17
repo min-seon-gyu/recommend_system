@@ -10,10 +10,7 @@ import kr.recommendsystem.domain.UserActionRecord
 import kr.recommendsystem.scheduler.UserPostScore
 import org.springframework.data.jpa.repository.JpaRepository
 
-interface UserActionRecordRepository : JpaRepository<UserActionRecord, Long>, UserPostScoreRepository {
-    fun existsByUserAndPost(user: User, post: Post): Boolean
-    fun findByUserAndPost(user: User, post: Post): UserActionRecord
-}
+interface UserActionRecordRepository : JpaRepository<UserActionRecord, Long>, UserPostScoreRepository
 
 interface UserPostScoreRepository {
     fun findAllWeights(): List<UserPostScore>
@@ -26,19 +23,21 @@ class UserPostScoreRepositoryImpl(
     override fun findAllWeights(): List<UserPostScore> {
         val query = jpql {
             val viewScore =
-                caseWhen(path(UserActionRecord::viewCount).gt(5L)).then(5L)
+                caseWhen(path(UserActionRecord::viewCount).gt(5L))
+                    .then(5L)
                     .`else`(path(UserActionRecord::viewCount))
 
             val favoriteScore =
-                caseWhen(path(UserActionRecord::favorite).eq(true)).then(10L)
+                caseWhen(path(UserActionRecord::favorite).eq(true))
+                    .then(10L)
                     .`else`(0L)
 
-            val weight = favoriteScore.plus(viewScore)
+            val weight = sum(favoriteScore.plus(viewScore))
 
             selectNew<UserPostScore>(
                 path(UserActionRecord::user)(User::id).alias(expression("userId")),
                 path(UserActionRecord::post)(Post::id).alias(expression("postId")),
-                sum(weight).alias(expression("weight"))
+                weight.alias(expression("weight"))
             )
                 .from(
                     entity(UserActionRecord::class)

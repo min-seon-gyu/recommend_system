@@ -14,8 +14,10 @@ import java.time.OffsetDateTime
         UniqueConstraint(name = "UniquePostIdAndUserId", columnNames = ["post_id", "user_id"])
     ],
     indexes = [
-        Index(name = "idx_post_id", columnList = "post_id"),
-        Index(name = "idx_user_id", columnList = "user_id")
+        Index(name = "idx_post", columnList = "post_id"),
+        Index(name = "idx_user", columnList = "user_id"),
+        Index(name = "idx_view_count", columnList = "view_count"),
+        Index(name = "idx_favorite", columnList = "favorite")
     ])
 class UserActionRecord(
     @Id

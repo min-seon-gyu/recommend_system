@@ -1,18 +1,29 @@
 package kr.recommendsystem.scheduler
 
-import kr.recommendsystem.config.MeasureExecutionTime
+import kotlinx.coroutines.*
+import kr.recommendsystem.repository.PostRepository
+import kr.recommendsystem.repository.RecommendPostRepository
 import kr.recommendsystem.repository.UserActionRecordRepository
+import kr.recommendsystem.repository.UserRepository
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.sqrt
+import kotlin.system.measureNanoTime
 
 @Component
 class RecommendScheduler(
-    private val weightQueryRepository: UserActionRecordRepository
+    private val weightQueryRepository: UserActionRecordRepository,
+    private val recommendPostRepository: RecommendPostRepository,
+    private val userRepository: UserRepository,
+    private val postRepository: PostRepository
 ) {
 
+    /** 사용자별 이미 상호작용한 게시글 집합 **/
     private lateinit var userPosts: Map<Long, Set<Long>>
+    /** 사용자별 게시글 가중치 벡터 **/
     private lateinit var userVectors: Map<Long, Map<Long, Double>>
+    /** 사용자별 벡터의 노름 **/
     private lateinit var userNorms: Map<Long, Double>
 
     /**
@@ -20,23 +31,44 @@ class RecommendScheduler(
      * 매일 03:00에 실행
      */
     @Scheduled(cron = "0 0 3 * * *")
-    @MeasureExecutionTime
     fun calculateSimilarity() {
-        val weights = calculateWeight()
+        CoroutineScope(Dispatchers.Default).launch {
+            executeRecommendationJob()
+        }
+    }
 
-        prepareUserData(weights)
+    private suspend fun executeRecommendationJob() {
+        var weights: List<UserPostScore>
+        val executionTime1 = measureNanoTime {
+            weights = calculateWeight()
+        }
+        println("calculateWeight() 실행 시간: ${executionTime1 / 1_000_000} ms")
 
-        val similarity = computeUserSimilaritiesEfficient(weights)
+        val executionTime2 = measureNanoTime {
+            prepareUserData(weights)
+        }
+        println("prepareUserData() 실행 시간: ${executionTime2 / 1_000_000} ms")
 
-        val recommendation = generateRecommendations(weights, similarity)
+        var similarity: List<UserSimilarity>
+        val executionTime3 = measureNanoTime {
+            similarity = computeUserSimilaritiesEfficientCoroutine(weights)
+        }
+        println("computeUserSimilaritiesEfficientCoroutine() 실행 시간: ${executionTime3 / 1_000_000} ms")
 
-        recommendation[1]!!.printPretty()
+
+        var recommendation = listOf<Recommendation>()
+        val executionTime4 = measureNanoTime {
+            recommendation = generateRecommendationsCoroutine(weights, similarity)
+        }
+        println("computeUserSimilaritiesEfficientCoroutine() 실행 시간: ${executionTime4 / 1_000_000} ms")
+
+        println("recommendation.size = ${recommendation.size}")
     }
 
     /**
      * 공통 데이터 준비:
      * - 사용자별 이미 상호작용한 게시글 집합 (userPosts)
-     * - 사용자별 게시글별 가중치 벡터 (userVectors)
+     * - 사용자별 게시글 가중치 벡터 (userVectors)
      * - 사용자별 벡터의 노름 (userNorms)
      */
     private fun prepareUserData(weights: List<UserPostScore>) {
@@ -47,72 +79,81 @@ class RecommendScheduler(
         userVectors = weights
             .groupBy { it.userId }
             .mapValues { entry ->
-                entry.value.associate { it.postId to it.weight.toDouble() }
+                entry.value.associate { it.postId to it.weight }
             }
-        userNorms = userVectors.mapValues { (_, vec) ->
-            sqrt(vec.values.sumOf { it * it })
-        }
+
+        userNorms = userVectors
+            .mapValues { (_, vec) ->
+                sqrt(vec.values.sumOf { it * it })
+            }
     }
 
     /**
      * 사용자 별 게시글에 대한 가중치 계산
      */
-    @MeasureExecutionTime
     fun calculateWeight(): List<UserPostScore> {
         return weightQueryRepository.findAllWeights()
     }
 
-    /**
-     * 주어진 weights 데이터를 기반으로 사용자 간 코사인 유사도를 효율적으로 계산하는 함수.
-     * 역색인 방식을 사용하여 실제 공통 게시글에 대해서만 내적을 누적합니다.
-     */
-    @MeasureExecutionTime
-    fun computeUserSimilaritiesEfficient(weights: List<UserPostScore>): List<UserSimilarity> {
-        // 역색인 구축: postId -> List of (userId, weight)
-        val invertedIndex: MutableMap<Long, MutableList<Pair<Long, Double>>> = mutableMapOf()
-        for (record in weights) {
-            invertedIndex.computeIfAbsent(record.postId) { mutableListOf() }
-                .add(record.userId to record.weight)
-        }
-
-        // 사용자 쌍별로 내적을 누적할 지도 (정렬된 순서로 키를 관리)
-        val dotProducts = mutableMapOf<Pair<Long, Long>, Double>()
-
-        // 각 게시글(postId)별로, 해당 게시글에 참여한 사용자들의 쌍에 대해 내적 기여를 누적
-        for ((postId, userList) in invertedIndex) {
-            if (userList.size <= 1) continue  // 이 게시글은 한 명만 참여하면 계산할 필요 없음.
-            for (i in 0 until userList.size) {
-                for (j in i + 1 until userList.size) {
-                    val (userA, weightA) = userList[i]
-                    val (userB, weightB) = userList[j]
-                    // 항상 (min(userA, userB), max(userA, userB)) 형태로 키 생성
-                    val key = if (userA < userB) Pair(userA, userB) else Pair(userB, userA)
-                    dotProducts[key] = dotProducts.getOrDefault(key, 0.0) + weightA * weightB
-                }
+    suspend fun computeUserSimilaritiesEfficientCoroutine(weights: List<UserPostScore>): List<UserSimilarity> =
+        coroutineScope {
+            // 1) 역색인 구축: postId -> List of (userId, weight)
+            val invertedIndex = mutableMapOf<Long, MutableList<Pair<Long, Double>>>()
+            for (rec in weights) {
+                invertedIndex
+                    .computeIfAbsent(rec.postId) { mutableListOf() }
+                    .add(rec.userId to rec.weight)
             }
+
+            // 2) 전역 ConcurrentHashMap 하나로 dotProducts 누적
+            val dotProducts = ConcurrentHashMap<Pair<Long, Long>, Double>()
+
+            // 3) 게시글별 내적 기여를 병렬 누적
+            val entries = invertedIndex.values.toList()
+            withContext(Dispatchers.Default) {
+                // chunk size 조절: 코어 수와 데이터 크기에 따라 튜닝 가능
+                val nCores = Runtime.getRuntime().availableProcessors()
+                val chunkSize = maxOf(1, entries.size / (nCores * 4))
+
+                entries
+                    .chunked(chunkSize)
+                    .map { chunk ->
+                        async {
+                            for (userList in chunk) {
+                                if (userList.size <= 1) continue
+                                for (i in 0 until userList.size) {
+                                    for (j in i + 1 until userList.size) {
+                                        val (uA, wA) = userList[i]
+                                        val (uB, wB) = userList[j]
+                                        val key = if (uA < uB) uA to uB else uB to uA
+                                        dotProducts.compute(key) { _, old ->
+                                            (old ?: 0.0) + wA * wB
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .awaitAll()
+            }
+
+            // 4) dotProducts에 저장된 내적을 이용해 코사인 유사도 계산
+            val similarities = mutableListOf<UserSimilarity>()
+            for ((pair, dot) in dotProducts) {
+                val (u1, u2) = pair
+                val norm1 = userNorms[u1] ?: 0.0
+                val norm2 = userNorms[u2] ?: 0.0
+                val sim = if (norm1 == 0.0 || norm2 == 0.0) 0.0 else dot / (norm1 * norm2)
+                similarities += UserSimilarity(u1, u2, sim)
+            }
+
+            similarities
         }
 
-        // 사용자 쌍별 코사인 유사도 계산
-        val similarities = mutableListOf<UserSimilarity>()
-        for ((pair, dot) in dotProducts) {
-            val (u1, u2) = pair
-            val norm1 = userNorms[u1] ?: 0.0
-            val norm2 = userNorms[u2] ?: 0.0
-            val sim = if (norm1 == 0.0 || norm2 == 0.0) 0.0 else dot / (norm1 * norm2)
-            similarities.add(UserSimilarity(u1, u2, sim))
-        }
-
-        return similarities
-    }
-
-    /**
-     * 추천 게시글 생성
-     */
-    @MeasureExecutionTime
-    fun generateRecommendations(
-        weights: List<UserPostScore>, similarities: List<UserSimilarity>
-    ): Map<Long, List<Recommendation>> {
-        // 사용자 간 유사도 매핑 (양방향)
+    suspend fun generateRecommendationsCoroutine(
+        weights: List<UserPostScore>, similarities: List<UserSimilarity>, topK: Int = 50        // 상위 50명 이웃만 사용한다고 가정
+    ): List<Recommendation> = coroutineScope {
+        // 1) Top‑K 이웃만 남긴 similarityMap 구성 (양방향)
         val similarityMap: Map<Long, List<Pair<Long, Double>>> = similarities
             .flatMap { sim ->
                 listOf(
@@ -121,31 +162,39 @@ class RecommendScheduler(
                 )
             }
             .groupBy({ it.first }, { it.second })
+            .mapValues { (_, neighList) ->
+                neighList
+                    .sortedByDescending { it.second }
+                    .take(topK)
+            }
 
-        // 추천 점수 계산
-        val recommendations = mutableMapOf<Long, MutableMap<Long, Double>>()  // userId -> (postId -> predictedScore)
-        val allUserIds = userVectors.keys
+        // 2) 병렬로 사용자별 추천 점수 계산
+        userVectors.keys.map { userId ->
+            async(Dispatchers.Default) {
+                val seen = userPosts[userId] ?: emptySet()
+                val rec = mutableMapOf<Long, Double>()
 
-        for (userId in allUserIds) {
-            val seenPosts = userPosts[userId] ?: emptySet()
-            val similarUsers = similarityMap[userId] ?: continue
-
-            for ((otherUserId, sim) in similarUsers) {
-                val otherUserVector = userVectors[otherUserId] ?: continue
-                for ((postId, weight) in otherUserVector) {
-                    if (postId in seenPosts) continue  // 이미 본 게시글은 제외
-                    recommendations.getOrPut(userId) { mutableMapOf() }
-                        .merge(postId, sim * weight) { old, new -> old + new }
+                // 상위 K 이웃만 반복
+                for ((otherId, sim) in similarityMap[userId] ?: emptyList()) {
+                    val vec = userVectors[otherId] ?: continue
+                    for ((postId, weight) in vec) {
+                        if (postId in seen) continue
+                        rec.merge(postId, sim * weight) { old, new -> old + new }
+                    }
                 }
+
+                // 정렬 + DTO 매핑
+                val list = rec.entries
+                    .sortedByDescending { it.value }
+                    .take(100)
+                    .map { (postId, score) ->
+                        Recommendation(userId, postId)
+                    }
+                userId to list
             }
         }
-
-        // 각 사용자별로 추천 게시글 내림차순 정렬 후 목록 생성
-        return recommendations.mapValues { (userId, recMap) ->
-            recMap.entries.sortedByDescending { it.value }
-                .map { (postId, predictedScore) ->
-                    Recommendation(userId = userId, postId = postId, predictedScore = predictedScore)
-                }
-        }
+            .awaitAll()
+            .toMap()
+            .flatMap { it.value }
     }
 }

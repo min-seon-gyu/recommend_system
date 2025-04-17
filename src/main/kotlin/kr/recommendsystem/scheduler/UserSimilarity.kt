@@ -1,26 +1,14 @@
 package kr.recommendsystem.scheduler
 
+/**
+ * 두 사용자 간의 유사도 정보를 담는 데이터 클래스
+ *
+ * @property baseUserId    유사도를 기준으로 삼는 사용자 ID
+ * @property targetUserId  비교 대상 사용자 ID
+ * @property similarity    코사인 유사도 값 (0.0 ~ 1.0)
+ */
 data class UserSimilarity(
-    val userId1: Long,
-    val userId2: Long,
+    val baseUserId: Long,
+    val targetUserId: Long,
     val similarity: Double
 )
-
-fun List<UserSimilarity>.printPretty() {
-    /* 헤더 출력 */
-    println("-----------유사도 계산 결과-----------")
-    println("%-10s %-10s %-12s".format("user_id1", "user_id2", "similarity"))
-
-    /* 본문 출력 */
-    forEach {
-        println(
-            "%-10d %-10d %-12f".format(
-                it.userId1,
-                it.userId2,
-                it.similarity
-            )
-        )
-    }
-    println("----------------------------------")
-    println()
-}

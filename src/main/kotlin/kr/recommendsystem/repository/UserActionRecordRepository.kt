@@ -13,14 +13,14 @@ import org.springframework.data.jpa.repository.JpaRepository
 interface UserActionRecordRepository : JpaRepository<UserActionRecord, Long>, UserPostScoreRepository
 
 interface UserPostScoreRepository {
-    fun findAllWeights(): List<UserPostScore>
+    suspend fun findAllWeights(): List<UserPostScore>
 }
 
 class UserPostScoreRepositoryImpl(
     private val entityManager: EntityManager,
     private val jpqlRenderContext: RenderContext
 ) : UserPostScoreRepository {
-    override fun findAllWeights(): List<UserPostScore> {
+    override suspend fun findAllWeights(): List<UserPostScore> {
         val query = jpql {
             val viewScore =
                 caseWhen(path(UserActionRecord::viewCount).gt(5L))

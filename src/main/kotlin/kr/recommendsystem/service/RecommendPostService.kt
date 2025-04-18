@@ -71,7 +71,7 @@ class RecommendPostService(
      * - 사용자별 벡터의 노름 (userNorms)
      *     - UserId -> Norm
      */
-    private fun prepareUserData(weights: List<UserPostScore>): CalculatorData {
+    private suspend fun prepareUserData(weights: List<UserPostScore>): CalculatorData {
         val userPosts = weights
             .groupBy { it.userId }
             .mapValues { it.value.map { postScore -> postScore.postId } }

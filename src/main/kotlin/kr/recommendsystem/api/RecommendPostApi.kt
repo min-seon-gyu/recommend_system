@@ -14,9 +14,7 @@ class RecommendPostApi(
 ) {
 
     @GetMapping("/{userId}")
-    fun get(@PathVariable userId: Long) {
-        runBlocking {
-            recommendPostService.getRecommendPosts(userId)
-        }
+    suspend fun get(@PathVariable userId: Long) {
+        recommendPostService.getRecommendPosts(userId)
     }
 }

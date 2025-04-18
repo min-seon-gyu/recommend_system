@@ -1,4 +1,4 @@
-package kr.recommendsystem.scheduler
+package kr.recommendsystem.service
 
 /**
  * 추천 게시글 계산 결과

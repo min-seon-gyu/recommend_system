@@ -7,7 +7,7 @@ import jakarta.persistence.EntityManager
 import kr.recommendsystem.domain.Post
 import kr.recommendsystem.domain.User
 import kr.recommendsystem.domain.UserActionRecord
-import kr.recommendsystem.scheduler.UserPostScore
+import kr.recommendsystem.service.UserPostScore
 import org.springframework.data.jpa.repository.JpaRepository
 
 interface UserActionRecordRepository : JpaRepository<UserActionRecord, Long>, UserPostScoreRepository

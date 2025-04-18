@@ -5,7 +5,7 @@ import jakarta.persistence.*
 @Entity
 class Post(
     @Id
-    @GeneratedValue(strategy = jakarta.persistence.GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     var id: Long? = null,
 
     /** 제목 **/

@@ -1,4 +1,4 @@
-package kr.recommendsystem.scheduler
+package kr.recommendsystem.service
 
 /**
  * 사용자 게시글 가중치 계산 결과

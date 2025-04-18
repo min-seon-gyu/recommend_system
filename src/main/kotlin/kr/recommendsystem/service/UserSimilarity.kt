@@ -1,4 +1,4 @@
-package kr.recommendsystem.scheduler
+package kr.recommendsystem.service
 
 /**
  * 두 사용자 간의 유사도 정보를 담는 데이터 클래스

@@ -1,22 +1,18 @@
-package kr.recommendsystem.scheduler
+package kr.recommendsystem.service
 
 import kotlinx.coroutines.*
-import kr.recommendsystem.repository.PostRepository
-import kr.recommendsystem.repository.RecommendPostRepository
 import kr.recommendsystem.repository.UserActionRecordRepository
-import kr.recommendsystem.repository.UserRepository
-import org.springframework.scheduling.annotation.Scheduled
-import org.springframework.stereotype.Component
+import org.springframework.stereotype.Service
 import kotlin.math.sqrt
 import kotlin.system.measureNanoTime
 
-@Component
-class RecommendScheduler(
-    private val weightQueryRepository: UserActionRecordRepository,
-    private val recommendPostRepository: RecommendPostRepository,
-    private val userRepository: UserRepository,
-    private val postRepository: PostRepository
+@Service
+class RecommendPostService(
+    private val weightQueryRepository: UserActionRecordRepository
 ) {
+
+    private final val topNSimilarity = 100
+    private final val topNPosts = 500
 
     /** 사용자별 이미 상호작용한 게시글 집합 **/
     private lateinit var userPosts: Map<Long, Set<Long>>
@@ -27,14 +23,7 @@ class RecommendScheduler(
     /** 사용자별 벡터의 노름 **/
     private lateinit var userNorms: Map<Long, Double>
 
-    /**
-     * 추천 게시글 저장을 위한 스케줄러
-     * 매일 03:00에 실행
-     */
-    @Scheduled(cron = "0 0 3 * * *")
-    fun calculateSimilarity() {
-        val userId = 1L
-
+    fun calculateSimilarity(userId: Long) {
         // TODO: 사용자 ID를 기준으로 이미 데이터가 있는 경우 or 게시글과 상호작용이 없는 사용자에 경우 생략
         CoroutineScope(Dispatchers.Default).launch {
             executeRecommendationJob(userId = userId)
@@ -46,25 +35,25 @@ class RecommendScheduler(
         val executionTime1 = measureNanoTime {
             weights = weightQueryRepository.findAllWeights()
         }
-        println("weightQueryRepository.findAllWeights() 실행 시간: ${executionTime1 / 1_000_000} ms")
+        println("weightQueryRepository.findAllWeights() 실행 시간: ${executionTime1 / 1_000_000}ms")
 
         val executionTime2 = measureNanoTime {
             prepareUserData(weights)
         }
-        println("prepareUserData() 실행 시간: ${executionTime2 / 1_000_000} ms")
+        println("prepareUserData() 실행 시간: ${executionTime2 / 1_000_000}ms")
 
         var similarity: List<UserSimilarity>
         val executionTime3 = measureNanoTime {
-            similarity = calculatorUserSimilarities(weights, userId)
+            similarity = calculatorUserSimilarities(userId)
         }
-        println("calculatorUserSimilarities() 실행 시간: ${executionTime3 / 1_000_000} ms")
+        println("calculatorUserSimilarities() 실행 시간: ${executionTime3 / 1_000_000}ms")
 
 
         var recommendation: List<Recommendation>
         val executionTime4 = measureNanoTime {
             recommendation = calculatorRecommendations(similarity, userId)
         }
-        println("calculatorRecommendations() 실행 시간: ${executionTime4 / 1_000_000} ms")
+        println("calculatorRecommendations() 실행 시간: ${executionTime4 / 1_000_000}ms")
 
         println("recommendation.size = ${recommendation.size}")
     }
@@ -107,8 +96,7 @@ class RecommendScheduler(
      *    d) 모든 비동기 작업 완료 대기 및 결과 평탄화
      * 3) 최종 UserSimilarity 리스트 반환
      */
-    suspend fun calculatorUserSimilarities(weights: List<UserPostScore>, userId: Long): List<UserSimilarity> {
-
+    private suspend fun calculatorUserSimilarities(userId: Long): List<UserSimilarity> {
         // 1) 자기 자신을 제외한 비교 대상 사용자 ID 집합
         val otherUserIds = userVectors.keys.filter { it != userId }.toSet()
 
@@ -143,11 +131,7 @@ class RecommendScheduler(
                                 else dotProduct / (normA * normB)
 
                                 // c.iii) 결과 객체 생성
-                                UserSimilarity(
-                                    baseUserId = userId,
-                                    targetUserId = otherUserId,
-                                    similarity = similarity
-                                )
+                                UserSimilarity(baseUserId = userId, targetUserId = otherUserId, similarity = similarity)
                             }
                         }
                     }
@@ -175,9 +159,8 @@ class RecommendScheduler(
      * 5) 총합 점수 내림차순 정렬 후 상위 topNPosts 개 반환
      */
     private suspend fun calculatorRecommendations(
-        similarities: List<UserSimilarity>, userId: Long, topNSimilarity: Int = 100, topNPosts: Int = 500
+        similarities: List<UserSimilarity>, userId: Long
     ): List<Recommendation> {
-
         // 1) 유사도 내림차순 정렬 후 상위 K개 선택
         val sortSimilarities = similarities
             .sortedByDescending { it.similarity }
@@ -208,9 +191,7 @@ class RecommendScheduler(
                                 // 3.c.iii) Recommendation 객체 생성
                                 filtered.map { (postId, weight) ->
                                     Recommendation(
-                                        userId = userId,
-                                        postId = postId,
-                                        score = similarity.similarity * weight
+                                        userId = userId, postId = postId, score = similarity.similarity * weight
                                     )
                                 }
                             }
@@ -223,14 +204,9 @@ class RecommendScheduler(
 
         // 4) (userId, postId) 기준으로 점수 합산 후 5) 내림차순 정렬 및 topNPosts 개 반환
         return recommendations
-            .asSequence()
             .groupBy { it.userId to it.postId }
             .map { (key, recs) ->
-                Recommendation(
-                    userId = key.first,
-                    postId = key.second,
-                    score = recs.sumOf { it.score }
-                )
+                Recommendation(userId = key.first, postId = key.second, score = recs.sumOf { it.score })
             }
             .sortedByDescending { it.score }
             .take(topNPosts)

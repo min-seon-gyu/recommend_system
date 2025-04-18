@@ -14,7 +14,7 @@ import java.time.OffsetDateTime
     ])
 class UserActionRecord(
     @Id
-    @GeneratedValue(strategy = jakarta.persistence.GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     var id: Long? = null,
 
     /** 사용자 **/

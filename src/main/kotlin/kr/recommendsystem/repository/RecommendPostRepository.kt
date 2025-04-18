@@ -10,11 +10,11 @@ class RecommendPostRepository(
 ) {
     private val valueOps = userPostRedisTemplate.opsForValue()
 
-    fun get(userId: Long): List<Long>? {
+    suspend fun get(userId: Long): List<Long>? {
         return valueOps.get(userId)
     }
 
-    fun set(userId: Long, posts: List<Long>) {
+    suspend fun set(userId: Long, posts: List<Long>) {
         valueOps.set(userId, posts, Duration.ofMinutes(5))
     }
 }

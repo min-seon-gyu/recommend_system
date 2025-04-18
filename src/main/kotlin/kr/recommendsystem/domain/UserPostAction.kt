@@ -12,7 +12,7 @@ import java.time.OffsetDateTime
     uniqueConstraints = [
         UniqueConstraint(name = "UniquePostIdAndUserId", columnNames = ["post_id", "user_id"])
     ])
-class UserActionRecord(
+class UserPostAction(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     var id: Long? = null,

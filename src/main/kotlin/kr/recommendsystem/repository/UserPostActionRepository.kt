@@ -6,45 +6,45 @@ import com.linecorp.kotlinjdsl.support.spring.data.jpa.extension.createQuery
 import jakarta.persistence.EntityManager
 import kr.recommendsystem.domain.Post
 import kr.recommendsystem.domain.User
-import kr.recommendsystem.domain.UserActionRecord
+import kr.recommendsystem.domain.UserPostAction
 import kr.recommendsystem.service.UserPostScore
 import org.springframework.data.jpa.repository.JpaRepository
 
-interface UserActionRecordRepository : JpaRepository<UserActionRecord, Long>, UserPostScoreRepository
+interface UserPostActionRepository : JpaRepository<UserPostAction, Long>, UserPostWeightRepository
 
-interface UserPostScoreRepository {
+interface UserPostWeightRepository {
     suspend fun findAllWeights(): List<UserPostScore>
 }
 
-class UserPostScoreRepositoryImpl(
+class UserPostWeightRepositoryImpl(
     private val entityManager: EntityManager,
     private val jpqlRenderContext: RenderContext
-) : UserPostScoreRepository {
+) : UserPostWeightRepository {
     override suspend fun findAllWeights(): List<UserPostScore> {
         val query = jpql {
             val viewScore =
-                caseWhen(path(UserActionRecord::viewCount).gt(5L))
+                caseWhen(path(UserPostAction::viewCount).gt(5L))
                     .then(5L)
-                    .`else`(path(UserActionRecord::viewCount))
+                    .`else`(path(UserPostAction::viewCount))
 
             val favoriteScore =
-                caseWhen(path(UserActionRecord::favorite).eq(true))
+                caseWhen(path(UserPostAction::favorite).eq(true))
                     .then(10L)
                     .`else`(0L)
 
             val weight = sum(favoriteScore.plus(viewScore))
 
             selectNew<UserPostScore>(
-                path(UserActionRecord::user)(User::id).alias(expression("userId")),
-                path(UserActionRecord::post)(Post::id).alias(expression("postId")),
+                path(UserPostAction::user)(User::id).alias(expression("userId")),
+                path(UserPostAction::post)(Post::id).alias(expression("postId")),
                 weight.alias(expression("weight"))
             )
                 .from(
-                    entity(UserActionRecord::class)
+                    entity(UserPostAction::class)
                 )
                 .groupBy(
-                    path(UserActionRecord::post)(Post::id),
-                    path(UserActionRecord::user)(User::id)
+                    path(UserPostAction::post)(Post::id),
+                    path(UserPostAction::user)(User::id)
                 )
         }
 

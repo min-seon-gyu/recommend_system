@@ -1,6 +1,5 @@
 package kr.recommendsystem.api
 
-import kotlinx.coroutines.runBlocking
 import kr.recommendsystem.service.RecommendPostService
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable

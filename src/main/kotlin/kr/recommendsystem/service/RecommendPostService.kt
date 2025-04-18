@@ -2,7 +2,7 @@ package kr.recommendsystem.service
 
 import kotlinx.coroutines.*
 import kr.recommendsystem.repository.RecommendPostRepository
-import kr.recommendsystem.repository.UserActionRecordRepository
+import kr.recommendsystem.repository.UserPostActionRepository
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import kotlin.math.sqrt
@@ -21,7 +21,7 @@ private data class CalculatorData(
 
 @Service
 class RecommendPostService(
-    private val weightQueryRepository: UserActionRecordRepository,
+    private val userPostWeightRepository: UserPostActionRepository,
     private val recommendPostRepository: RecommendPostRepository,
     @Value("\${recommendation.max-similar-users}")
     private val maxSimilarUsers: Int,
@@ -45,6 +45,8 @@ class RecommendPostService(
         if (result.isNotEmpty()) {
             println("Redis 캐시에서 추천 게시글 목록을 저장함")
             recommendPostRepository.set(userId, result)
+        } else{
+            println("추천 게시글 목록이 없음")
         }
 
         return result
@@ -52,7 +54,7 @@ class RecommendPostService(
 
     private suspend fun executeRecommendationJob(userId: Long): List<Long> {
         val weights = withContext(Dispatchers.IO) {
-            weightQueryRepository.findAllWeights()
+            userPostWeightRepository.findAllWeights()
         }
 
         val data = prepareUserData(weights)
@@ -201,6 +203,5 @@ class RecommendPostService(
             }
             .sortedByDescending { it.score }
             .take(maxRecommendedPosts)
-            .toList()
     }
 }

@@ -15,4 +15,7 @@ spring:
 recommendation:
   max-similar-users: 100
   max-recommended-posts: 500
+redis:
+  host: localhost
+  port: 6379
 

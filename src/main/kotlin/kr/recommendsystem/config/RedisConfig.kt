@@ -1,5 +1,6 @@
 package kr.recommendsystem.config
 
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.cache.annotation.EnableCaching
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -12,20 +13,22 @@ import org.springframework.data.redis.serializer.GenericToStringSerializer
 @Configuration
 @EnableCaching
 class RedisConfig(
-    private val redisHost: String = "localhost",
-    private val redisPort: Int = 6379
+    @Value("\${redis.host}")
+    private val host: String,
+    @Value("\${redis.port}")
+    private val port: Int
 ) {
     @Bean
     fun redisConnectionFactory(): RedisConnectionFactory {
-        return LettuceConnectionFactory(redisHost, redisPort)
+        return LettuceConnectionFactory(host, port)
     }
 
     @Bean
     fun userPostRedisTemplate(redisConnectionFactory: RedisConnectionFactory): RedisTemplate<Long, List<Long>> {
         return RedisTemplate<Long, List<Long>>().apply {
             connectionFactory = redisConnectionFactory
-            keySerializer = GenericToStringSerializer(Long::class.java) // Long → String 직렬화
-            valueSerializer = GenericJackson2JsonRedisSerializer()      // List<Long> → JSON
+            keySerializer = GenericToStringSerializer(Long::class.java)
+            valueSerializer = GenericJackson2JsonRedisSerializer()
         }
     }
 }

@@ -11,3 +11,8 @@ spring:
       hibernate:
         show_sql: true
         format_sql: true
+
+recommendation:
+  max-similar-users: 100
+  max-recommended-posts: 500
+

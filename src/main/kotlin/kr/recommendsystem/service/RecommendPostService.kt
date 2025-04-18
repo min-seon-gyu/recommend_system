@@ -1,7 +1,9 @@
 package kr.recommendsystem.service
 
 import kotlinx.coroutines.*
+import kr.recommendsystem.repository.RecommendPostRepository
 import kr.recommendsystem.repository.UserActionRecordRepository
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import kotlin.math.sqrt
 
@@ -19,25 +21,36 @@ private data class CalculatorData(
 
 @Service
 class RecommendPostService(
-    private val weightQueryRepository: UserActionRecordRepository
+    private val weightQueryRepository: UserActionRecordRepository,
+    private val recommendPostRepository: RecommendPostRepository,
+    @Value("\${recommendation.max-similar-users}")
+    private val maxSimilarUsers: Int,
+    @Value("\${recommendation.max-recommended-posts}")
+    private val maxRecommendedPosts: Int
 ) {
-    private final val topNSimilarity = 100
-    private final val topNPosts = 500
 
-    suspend fun getRecommendPosts(userId: Long) {
-        val handler = CoroutineExceptionHandler { _, e ->
-            // 예외 처리 로직
+    suspend fun getRecommendPosts(userId: Long): List<Long> {
+        val get = recommendPostRepository.get(userId)
+        if (get != null) {
+            println("Redis 캐시에서 추천 게시글 목록을 가져옴")
+            return get
         }
 
-        // TODO: 사용자 ID를 기준으로 이미 데이터가 있는 경우 or 게시글과 상호작용이 없는 사용자에 경우 생략
-        coroutineScope {
-            launch(Dispatchers.Default + handler) {
+        val result = coroutineScope {
+            async(Dispatchers.Default) {
                 executeRecommendationJob(userId = userId)
-            }
+            }.await()
         }
+
+        if (result.isNotEmpty()) {
+            println("Redis 캐시에서 추천 게시글 목록을 저장함")
+            recommendPostRepository.set(userId, result)
+        }
+
+        return result
     }
 
-    private suspend fun executeRecommendationJob(userId: Long) {
+    private suspend fun executeRecommendationJob(userId: Long): List<Long> {
         val weights = withContext(Dispatchers.IO) {
             weightQueryRepository.findAllWeights()
         }
@@ -46,7 +59,7 @@ class RecommendPostService(
 
         val similarity = calculatorUserSimilarities(userId, data)
 
-        calculatorRecommendations(similarity, userId, data)
+        return calculatorRecommendations(similarity, userId, data).map { it.postId }
     }
 
     /**
@@ -146,7 +159,7 @@ class RecommendPostService(
         // 1) 유사도 내림차순 정렬 후 상위 K개 선택
         val sortSimilarities = similarities
             .sortedByDescending { it.similarity }
-            .take(topNSimilarity)
+            .take(maxSimilarUsers)
 
         // 2) 이미 상호작용한 게시글 ID 구하기
         val interactedPostIds = data.posts[userId] ?: emptyList()
@@ -187,7 +200,7 @@ class RecommendPostService(
                 Recommendation(userId = key.first, postId = key.second, score = recs.sumOf { it.score })
             }
             .sortedByDescending { it.score }
-            .take(topNPosts)
+            .take(maxRecommendedPosts)
             .toList()
     }
 }

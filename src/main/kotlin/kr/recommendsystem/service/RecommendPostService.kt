@@ -29,18 +29,14 @@ class RecommendPostService(
     private val maxRecommendedPosts: Int
 ) {
 
-    suspend fun getRecommendPosts(userId: Long): List<Long> {
+    fun getRecommendPosts(userId: Long): List<Long> {
         val get = recommendPostRepository.get(userId)
         if (get != null) {
             println("Redis 캐시에서 추천 게시글 목록을 가져옴")
             return get
         }
 
-        val result = coroutineScope {
-            async(Dispatchers.Default) {
-                executeRecommendationJob(userId = userId)
-            }.await()
-        }
+        val result = executeRecommendationJob(userId = userId)
 
         if (result.isNotEmpty()) {
             println("Redis 캐시에서 추천 게시글 목록을 저장함")
@@ -52,7 +48,7 @@ class RecommendPostService(
         return result
     }
 
-    private suspend fun executeRecommendationJob(userId: Long): List<Long> {
+    private fun executeRecommendationJob(userId: Long): List<Long> = runBlocking(Dispatchers.Default) {
         val weights = withContext(Dispatchers.IO) {
             userPostWeightRepository.findAllWeights()
         }
@@ -61,7 +57,7 @@ class RecommendPostService(
 
         val similarity = calculatorUserSimilarities(userId, data)
 
-        return calculatorRecommendations(similarity, userId, data).map { it.postId }
+        calculatorRecommendations(similarity, userId, data).map { it.postId }
     }
 
     /**
@@ -73,7 +69,7 @@ class RecommendPostService(
      * - 사용자별 벡터의 노름 (userNorms)
      *     - UserId -> Norm
      */
-    private suspend fun prepareUserData(weights: List<UserPostScore>): CalculatorData {
+    private fun prepareUserData(weights: List<UserPostScore>): CalculatorData {
         val userPosts = weights
             .groupBy { it.userId }
             .mapValues { it.value.map { postScore -> postScore.postId } }

@@ -13,7 +13,7 @@ class RecommendPostApi(
 ) {
 
     @GetMapping("/{userId}")
-    suspend fun get(@PathVariable userId: Long) {
+    fun get(@PathVariable userId: Long) {
         recommendPostService.getRecommendPosts(userId)
     }
 }

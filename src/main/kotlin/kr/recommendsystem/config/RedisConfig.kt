@@ -8,7 +8,7 @@ import org.springframework.data.redis.connection.RedisConnectionFactory
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
 import org.springframework.data.redis.core.RedisTemplate
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer
-import org.springframework.data.redis.serializer.GenericToStringSerializer
+import org.springframework.data.redis.serializer.StringRedisSerializer
 
 @Configuration
 @EnableCaching
@@ -24,10 +24,10 @@ class RedisConfig(
     }
 
     @Bean
-    fun userPostRedisTemplate(redisConnectionFactory: RedisConnectionFactory): RedisTemplate<Long, List<Long>> {
-        return RedisTemplate<Long, List<Long>>().apply {
+    fun userPostRedisTemplate(redisConnectionFactory: RedisConnectionFactory): RedisTemplate<String, List<Long>> {
+        return RedisTemplate<String, List<Long>>().apply {
             connectionFactory = redisConnectionFactory
-            keySerializer = GenericToStringSerializer(Long::class.java)
+            keySerializer = StringRedisSerializer()
             valueSerializer = GenericJackson2JsonRedisSerializer()
         }
     }

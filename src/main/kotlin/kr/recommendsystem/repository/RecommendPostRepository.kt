@@ -6,7 +6,7 @@ import java.time.Duration
 
 @Repository
 class RecommendPostRepository(
-    userPostRedisTemplate: RedisTemplate<Long, List<Long>>
+    userPostRedisTemplate: RedisTemplate<String, List<Long>>
 ) {
     private val valueOps = userPostRedisTemplate.opsForValue()
 
@@ -15,6 +15,6 @@ class RecommendPostRepository(
     }
 
     fun set(userId: Long, posts: List<Long>) {
-        valueOps.set(userId, posts, Duration.ofMinutes(5))
+        valueOps.set(userId.toString(), posts, Duration.ofMinutes(5))
     }
 }

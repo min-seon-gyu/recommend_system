@@ -171,10 +171,10 @@ class RecommendPostService(
             .chunked(batchSize)
             .map { batch ->
                 async {
-                    batch.flatMap { similarity ->
+                    batch.flatMap { userSimilarity ->
                         // 3-1) 대상 사용자의 벡터 가져오기
                         val vector =
-                            data.vectors[similarity.targetUserId] ?: return@flatMap emptyList<Recommendation>()
+                            data.vectors[userSimilarity.targetUserId] ?: return@flatMap emptyList<Recommendation>()
 
                         // 3-2) 이미 상호작용한 게시글 제외
                         val filtered = vector.filterKeys { it !in interactedPostIds }
@@ -182,7 +182,7 @@ class RecommendPostService(
                         // 3-3) Recommendation 객체 생성
                         filtered.map { (postId, weight) ->
                             Recommendation(
-                                userId = userId, postId = postId, score = similarity.similarity * weight
+                                userId = userId, postId = postId, score = userSimilarity.similarity * weight
                             )
                         }
                     }

@@ -32,12 +32,10 @@ class UserPostWeightRepositoryImpl(
                     .then(10L)
                     .`else`(0L)
 
-            val weight = sum(favoriteScore.plus(viewScore))
-
             selectNew<UserPostScore>(
-                path(UserPostAction::user)(User::id).alias(expression("userId")),
-                path(UserPostAction::post)(Post::id).alias(expression("postId")),
-                weight.alias(expression("weight"))
+                path(UserPostAction::user)(User::id),
+                path(UserPostAction::post)(Post::id),
+                sum(favoriteScore.plus(viewScore))
             )
                 .from(
                     entity(UserPostAction::class)
